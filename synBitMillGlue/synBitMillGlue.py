@@ -6,7 +6,7 @@
 #    AWS_ACCESS_KEY_ID - AWS Access Key ID for the AWS user that can create buckets and IAM users
 #    AWS_SECRET_ACCESS_KEY - AWS Secret Access Key for the AWS user that can create buckets and IAM users
 #    EVALUATION_ID 
-#    NUMERATE_EMAIL_ADDRESS
+#    NUMERATE_BUCKET_ACCESS_EMAIL_ADDRESS
 #    SYNAPSE_USER_ID
 #    SYNAPSE_USER_PW
 #    SNS_TOPIC
@@ -21,14 +21,13 @@ from boto.exception import BotoServerError
 from boto.sns import SNSConnection
 from json import dumps
 from createUserNameMod import createUserName
+from sys import exit
 
 evaluationId = environ['EVALUATION_ID']
 numerateBucketAccessEmailAddress= environ['NUMERATE_BUCKET_ACCESS_EMAIL_ADDRESS']
-numerateEmailReceiptEmailAddress= environ['NUMERATE_EMAIL_RECEIPT_EMAIL_ADDRESS']
 synapseUserId = environ['SYNAPSE_USER_ID']
 synapseUserPw = environ['SYNAPSE_USER_PW']
 snsTopic = environ['SNS_TOPIC']
-
 aws_access_key_id=environ["AWS_ACCESS_KEY_ID"]
 aws_secret_access_key=environ["AWS_SECRET_ACCESS_KEY"]
 
@@ -56,7 +55,7 @@ for i,part in enumerate(participants):
     ## has the user's bucket already been created in S3?
     userBucket = s3Connection.lookup(userName)
     if userBucket is None:
-        ## Create a IAM user for that participant in the wcpe@sagebase.org aws account.
+        ## Create a IAM user for that participant aws account.
         try:
             user = iamConnection.get_user(userName)
         except BotoServerError:
