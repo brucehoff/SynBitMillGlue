@@ -42,7 +42,7 @@ ownUserProfile = syn.getUserProfile()
 ownPrincipalId = ownUserProfile['ownerId']
 
 ## get all Participants for Evaluation
-participants = syn.restGET("/evaluation/"+evaluationId+'/participant')['results']
+participants = syn.restGET("/evaluation/"+evaluationId+'/participant?limit=99999')['results']
 print "total number of results: "+str(len(participants))
 
 s3Connection = connect_s3()
@@ -110,10 +110,20 @@ for i,part in enumerate(participants):
                         {"accessType": ["CHANGE_PERMISSIONS", "DELETE", "CREATE", "UPDATE", "READ"], "principalId":ownPrincipalId}]}
             syn._storeACL(synapseFile.id, acl)
          
-    ## 
-    ## Send to an SNS topic the list of Participants, including bucket id. 
-    ##
+## 
+## Send to an SNS topic the list of Participants, including bucket id. 
+##
+snsConnection = SNSConnection(aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
+batchSize = 40
+start = 0
+while (start<len(participantList)):
+    message = dumps(participantList[start:(start+batchSize)], indent=2)
     if anyNewUsers:
-        snsConnection = SNSConnection(aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
-        message = dumps(participantList, indent=2)
         snsConnection.publish(topic=snsTopic, message=message, subject="WCPE Participant List")
+    else:
+        print "No new users, so participant list will not be sent. Message content _would_ be:"
+        print message
+        print ""
+    start += batchSize
+
+    
