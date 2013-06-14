@@ -23,6 +23,9 @@ from boto.exception import BotoServerError
 from boto.sns import SNSConnection
 from json import dumps
 from createUserNameMod import createUserName
+import logging
+
+logging.basicConfig(filename="synBitMillGlue.log", level=logging.DEBUG)
 
 evaluationId = environ['EVALUATION_ID']
 numerateBucketAccessEmailAddress= environ['NUMERATE_BUCKET_ACCESS_EMAIL_ADDRESS']
@@ -114,7 +117,7 @@ for i,part in enumerate(participants):
 ## Send to an SNS topic the list of Participants, including bucket id. 
 ##
 snsConnection = SNSConnection(aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
-batchSize = 40
+batchSize = 8
 start = 0
 while (start<len(participantList)):
     message = dumps(participantList[start:(start+batchSize)], indent=2)
