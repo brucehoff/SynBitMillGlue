@@ -62,56 +62,66 @@ for i,part in enumerate(participants):
     userName = createUserName(up['firstName'], up['lastName'], partId, MAXIMUM_USER_NAME_LENGTH)
     participantList.append({'firstName':up['firstName'], 'lastName':up['lastName'], 'email':up['email'], 'userName':userName, 'bucketName':userName, 'principalId':partId})
     print userName
+    
+    # Ensure user exists
+    ## Create a IAM user for that participant's aws account.
+    try:
+        user = iamConnection.get_user(userName)
+    except BotoServerError:
+        # user does not exist
+        user = iamConnection.create_user(userName)
+        anyNewUsers=True
+        print "\t"+userName+" is a new user"
+   
+    # Set user policy
+    ## Give the user access to the bucket
+    policy_json = "{\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":[\"arn:aws:s3:::"+userName+"\",\"arn:aws:s3:::"+userName+"/*\"]}]}"
+    iamConnection.put_user_policy(userName, userName+"_policy", policy_json)
+   
+    # Ensure bucket exists
     ## has the user's bucket already been created in S3?
     userBucket = s3Connection.lookup(userName)
     if userBucket is None:
+        anyNewUsers=True  
         print "\t"+userName+" is a new user"
-        anyNewUsers=True
-        ## Create a IAM user for that participant aws account.
-        try:
-            user = iamConnection.get_user(userName)
-        except BotoServerError:
-            # user does not exist
-            user = iamConnection.create_user(userName)
-        
         ## Create a bucket for that user in the same account
         userBucket = s3Connection.create_bucket(userName)
-        ## Give the user access to the bucket
-        policy_json = "{\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"s3:*\",\"Resource\":\"arn:aws:s3:::"+userName+"/*\"}]}"
-        iamConnection.put_user_policy(userName, userName+"_policy", policy_json)
         ## Grant a Numerate IAM user full control of the bucket. 
         userBucket = userBucket.add_email_grant("FULL_CONTROL", numerateBucketAccessEmailAddress)
-        
-        ## get or create an access key
-        allKeys = iamConnection.get_all_access_keys(userName)
-        alreadyHasKey = (len(allKeys['list_access_keys_response']['list_access_keys_result']['access_key_metadata'])>0)
-        ## if there isn't a key already, then create one and upload it to Synapse
-        if not alreadyHasKey:
-            ## Create a key
-            accessKey = iamConnection.create_access_key(userName)
-            accessKeyId = accessKey['create_access_key_response']['create_access_key_result']['access_key']['access_key_id']
-            secretAccessKey = accessKey['create_access_key_response']['create_access_key_result']['access_key']['secret_access_key']
-            ## Write to a local, temporary file
-            fileName = userName
-            try:
-                remove(fileName)
-            except:
-                ## do nothing
-                pass
-            f = open(fileName, 'w')
-            f.write("The following credentials provide access to the AWS S3 bucket: "+userName+"\n")
-            f.write('accessKeyId: '+accessKeyId+'\n')
-            f.write('secretAccessKey: '+secretAccessKey+'\n')
-            f.close()
-            ## Upload the file to Synapse
-            synapseFile = File(fileName, parentId=synapseAccessKeyProjectId)
-            synapseFile = syn.store(synapseFile)
-            ## clean up the temporary file
+    
+    
+    # Ensure credentials exist
+    ## get or create an access key
+    allKeys = iamConnection.get_all_access_keys(userName)
+    alreadyHasKey = (len(allKeys['list_access_keys_response']['list_access_keys_result']['access_key_metadata'])>0)
+    ## if there isn't a key already, then create one and upload it to Synapse
+    if not alreadyHasKey:
+        print "\tcreating access credentials for "+userName
+        ## Create a key
+        accessKey = iamConnection.create_access_key(userName)
+        accessKeyId = accessKey['create_access_key_response']['create_access_key_result']['access_key']['access_key_id']
+        secretAccessKey = accessKey['create_access_key_response']['create_access_key_result']['access_key']['secret_access_key']
+        ## Write to a local, temporary file
+        fileName = userName
+        try:
             remove(fileName)
-            ## create the ACL, giving the user 'read' access (and the admin ALL access)
-            acl = {"resourceAccess":[{"accessType":["READ"],"principalId":partId},  \
+        except:
+            ## do nothing
+            pass
+        f = open(fileName, 'w')
+        f.write("The following credentials provide access to the AWS S3 bucket: "+userName+"\n")
+        f.write('accessKeyId: '+accessKeyId+'\n')
+        f.write('secretAccessKey: '+secretAccessKey+'\n')
+        f.close()
+        ## Upload the file to Synapse
+        synapseFile = File(fileName, parentId=synapseAccessKeyProjectId)
+        synapseFile = syn.store(synapseFile)
+        ## clean up the temporary file
+        remove(fileName)
+        ## create the ACL, giving the user 'read' access (and the admin ALL access)
+        acl = {"resourceAccess":[{"accessType":["READ"],"principalId":partId},  \
                         {"accessType": ["CHANGE_PERMISSIONS", "DELETE", "CREATE", "UPDATE", "READ"], "principalId":ownPrincipalId}]}
-            syn._storeACL(synapseFile.id, acl)
+        syn._storeACL(synapseFile.id, acl)
          
 ## 
 ## Send to an SNS topic the list of Participants, including bucket id. 
