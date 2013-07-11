@@ -6,7 +6,7 @@ Created on Jun 6, 2013
 import unittest
 from createUserNameMod import createUserName
 
-class Test(unittest.TestCase):
+class TestCreateUserName(unittest.TestCase):
 
 
     def testCreateName(self):

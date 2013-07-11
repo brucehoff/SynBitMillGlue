@@ -3,8 +3,8 @@
 ## https://sagebionetworks.jira.com/browse/PLFM-1954
 ##
 #  set the environment variables:
-#    AWS_ACCESS_KEY_ID - AWS Access Key ID for the AWS user that can create buckets and IAM users
-#    AWS_SECRET_ACCESS_KEY - AWS Secret Access Key for the AWS user that can create buckets and IAM users
+#    AWS_ACCESS_KEY_ID_<i> (i=1,2..) - AWS Access Key ID for the AWS user that can create buckets and IAM users
+#    AWS_SECRET_ACCESS_KEY_<i> (i=1,2..) - AWS Secret Access Key for the AWS user that can create buckets and IAM users
 #    EVALUATION_ID 
 #    NUMERATE_BUCKET_ACCESS_EMAIL_ADDRESS
 #    SYNAPSE_USER_ID
@@ -18,11 +18,11 @@ from synapseclient import File
 from os import environ
 from os import remove
 from boto.iam.connection import IAMConnection
-from boto import connect_s3
-from boto.exception import BotoServerError
+from boto.s3.connection import S3Connection
 from boto.sns import SNSConnection
 from json import dumps
 from createUserNameMod import createUserName
+from awsUtil import *
 import logging
 
 logging.basicConfig(filename="synBitMillGlue.log", level=logging.DEBUG)
@@ -32,9 +32,27 @@ numerateBucketAccessEmailAddress= environ['NUMERATE_BUCKET_ACCESS_EMAIL_ADDRESS'
 synapseUserId = environ['SYNAPSE_USER_ID']
 synapseUserPw = environ['SYNAPSE_USER_PW']
 snsTopic = environ['SNS_TOPIC']
-aws_access_key_id=environ["AWS_ACCESS_KEY_ID"]
-aws_secret_access_key=environ["AWS_SECRET_ACCESS_KEY"]
+# we allow multiple AWS accounts.  this gets us past the 100 bucket per account limit
 synapseAccessKeyProjectId=environ["SYNAPSE_ACCESS_KEY_PROJECT_ID"]
+
+s3Connections = []
+iamConnections = []
+i=0
+while True:
+    aws_access_key_id = environ.get("AWS_ACCESS_KEY_ID_"+str(i+1))
+    aws_secret_access_key = environ.get("AWS_SECRET_ACCESS_KEY_"+str(i+1))
+    if (i==0):
+        snsConnection = SNSConnection(aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
+
+    if ((aws_access_key_id is None) or (aws_secret_access_key is None)):
+        break
+    else:
+        s3Connections.append(S3Connection(aws_access_key_id, aws_secret_access_key))
+        iamConnections.append(IAMConnection(aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key))
+        i=i+1
+        
+if (len(s3Connections)==0):
+    raise("No AWS crdentials provided")
 
 MAXIMUM_USER_NAME_LENGTH = 63
 
@@ -48,8 +66,6 @@ ownPrincipalId = ownUserProfile['ownerId']
 participants = syn.restGET("/evaluation/"+evaluationId+'/participant?limit=99999')['results']
 print "total number of results: "+str(len(participants))
 
-s3Connection = connect_s3()
-iamConnection = IAMConnection(aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
 ## For each participant
 participantList = []
 anyNewUsers = False
@@ -65,13 +81,21 @@ for i,part in enumerate(participants):
     
     # Ensure user exists
     ## Create a IAM user for that participant's aws account.
-    try:
-        user = iamConnection.get_user(userName)
-    except BotoServerError:
+    indexOfAccountForUser = findUser(userName, iamConnections)
+    if (indexOfAccountForUser<0):
         # user does not exist
-        user = iamConnection.create_user(userName)
         anyNewUsers=True
         print "\t"+userName+" is a new user"
+        # need to create user in an account that can accommodate a new bucket
+        indexOfAccountForUser = findBucketSpace(s3Connections)
+        if (indexOfAccountForUser<0):
+            raise("No account has room for a new bucket!")
+        iamConnections[indexOfAccountForUser].create_user(userName)
+    else:
+        user = iamConnections[indexOfAccountForUser].get_user(userName)
+    iamConnection = iamConnections[indexOfAccountForUser]
+    s3Connection = s3Connections[indexOfAccountForUser]
+        
    
     # Set user policy
     ## Give the user access to the bucket
@@ -126,7 +150,6 @@ for i,part in enumerate(participants):
 ## 
 ## Send to an SNS topic the list of Participants, including bucket id. 
 ##
-snsConnection = SNSConnection(aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key)
 batchSize = 8
 start = 0
 while (start<len(participantList)):
